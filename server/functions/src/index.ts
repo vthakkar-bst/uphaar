@@ -154,6 +154,46 @@ const handleCreateItem = async (user: any, body: any): Promise<{ statusCode: num
   }
 };
 
+const handleUpdateItem = async (user: any, itemId: string, body: any): Promise<{ statusCode: number; body: any }> => {
+  try {
+    if (!user || !user.uid) {
+      return {statusCode: 401, body: {error: 'Authentication required'}};
+    }
+
+    const itemDoc = await firestore().collection('items').doc(itemId).get();
+
+    if (!itemDoc.exists) {
+      return {statusCode: 404, body: {error: 'Item not found'}};
+    }
+
+    const itemData = itemDoc.data();
+    if (itemData?.userId !== user.uid) {
+      return {statusCode: 403, body: {error: 'You can only update your own items'}};
+    }
+
+    const updatedItem = {
+      ...body,
+      userId: user.uid, // Ensure userId cannot be changed
+      updatedAt: firestore.Timestamp.now(),
+      createdAt: itemData?.createdAt, // Preserve original creation time
+    };
+
+    await firestore().collection('items').doc(itemId).update(updatedItem);
+
+    const updatedItemWithId = {
+      id: itemId,
+      ...updatedItem,
+      createdAt: updatedItem.createdAt?.toDate?.()?.toISOString() || updatedItem.createdAt,
+      updatedAt: updatedItem.updatedAt?.toDate?.()?.toISOString() || updatedItem.updatedAt,
+    };
+
+    return {statusCode: 200, body: {item: updatedItemWithId}};
+  } catch (error) {
+    console.error('Error updating item:', error);
+    return {statusCode: 500, body: {error: 'Failed to update item'}};
+  }
+};
+
 const handleDeleteItem = async (user: any, itemId: string): Promise<{ statusCode: number; body: any }> => {
   try {
     if (!user || !user.uid) {
@@ -230,6 +270,31 @@ const handleGetUser = async (userId: string): Promise<{ statusCode: number; body
   }
 };
 
+const handleGetCurrentUserProfile = async (user: any): Promise<{ statusCode: number; body: any }> => {
+  try {
+    if (!user || !user.uid) {
+      return {statusCode: 401, body: {error: 'Authentication required'}};
+    }
+
+    const userDoc = await firestore().collection('users').doc(user.uid).get();
+
+    if (!userDoc.exists) {
+      return {statusCode: 404, body: {error: 'User profile not found'}};
+    }
+
+    const userData = userDoc.data() as UserProfile;
+    const userProfile = {
+      uid: userDoc.id,
+      ...userData,
+    };
+
+    return {statusCode: 200, body: {profile: userProfile}};
+  } catch (error) {
+    console.error('Error fetching current user profile:', error);
+    return {statusCode: 500, body: {error: 'Failed to fetch user profile'}};
+  }
+};
+
 // Main Firebase Function
 export const api = functions.https.onRequest(async (req, res) => {
   // Set CORS headers
@@ -283,6 +348,13 @@ export const api = functions.https.onRequest(async (req, res) => {
       }
     } else if (req.method === 'POST' && req.path === '/items') {
       result = await handleCreateItem(user, req.body);
+    } else if (req.method === 'PUT' && req.path.startsWith('/items/')) {
+      const itemId = req.path.split('/').pop();
+      if (itemId) {
+        result = await handleUpdateItem(user, itemId, req.body);
+      } else {
+        result = {statusCode: 400, body: {error: 'Item ID required'}};
+      }
     } else if (req.method === 'DELETE' && req.path.startsWith('/items/')) {
       const itemId = req.path.split('/').pop();
       if (itemId) {
@@ -290,6 +362,8 @@ export const api = functions.https.onRequest(async (req, res) => {
       } else {
         result = {statusCode: 400, body: {error: 'Item ID required'}};
       }
+    } else if (req.method === 'GET' && req.path === '/users/profile') {
+      result = await handleGetCurrentUserProfile(user);
     } else if (req.method === 'POST' && req.path === '/users/profile') {
       result = await handleCreateOrUpdateUserProfile(user);
     } else if (req.method === 'GET' && req.path.startsWith('/users/') && req.path !== '/users/profile') {

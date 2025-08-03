@@ -209,6 +209,27 @@ const handleCreateOrUpdateUserProfile = async (user: any): Promise<{ statusCode:
   }
 };
 
+const handleGetUser = async (userId: string): Promise<{ statusCode: number; body: any }> => {
+  try {
+    const userDoc = await firestore().collection('users').doc(userId).get();
+
+    if (!userDoc.exists) {
+      return {statusCode: 404, body: {error: 'User not found'}};
+    }
+
+    const userData = userDoc.data() as UserProfile;
+    const userProfile = {
+      uid: userDoc.id,
+      ...userData,
+    };
+
+    return {statusCode: 200, body: {profile: userProfile}};
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
+    return {statusCode: 500, body: {error: 'Failed to fetch user profile'}};
+  }
+};
+
 // Main Firebase Function
 export const api = functions.https.onRequest(async (req, res) => {
   // Set CORS headers
@@ -271,6 +292,13 @@ export const api = functions.https.onRequest(async (req, res) => {
       }
     } else if (req.method === 'POST' && req.path === '/users/profile') {
       result = await handleCreateOrUpdateUserProfile(user);
+    } else if (req.method === 'GET' && req.path.startsWith('/users/') && req.path !== '/users/profile') {
+      const userId = req.path.split('/').pop();
+      if (userId) {
+        result = await handleGetUser(userId);
+      } else {
+        result = {statusCode: 400, body: {error: 'User ID required'}};
+      }
     } else {
       result = {statusCode: 404, body: {error: 'Route not found'}};
     }

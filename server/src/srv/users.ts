@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { firestore } from '../config/firebase';
+import { verifyFirebaseToken } from './auth';
 
 interface UserProfile {
   uid: string;
@@ -28,6 +29,8 @@ interface UpdateProfileRequest {
  * @param fastify - Fastify instance
  */
 export const userRoutes = async (fastify: FastifyInstance): Promise<void> => {
+  // Apply the authentication middleware to all user routes
+  fastify.addHook('preHandler', verifyFirebaseToken);
   // Get user profile
   fastify.get('/:uid', async (request: FastifyRequest<{ Params: { uid: string } }>, reply: FastifyReply) => {
     try {
@@ -83,7 +86,13 @@ export const userRoutes = async (fastify: FastifyInstance): Promise<void> => {
     try {
       const user = (request as any).user;
       
-      // Check if user already exists
+      // Check if user exists in the request (authentication successful)
+      if (!user || !user.uid) {
+        console.error('Error creating/updating user profile: User not authenticated');
+        return reply.code(401).send({ error: 'Authentication required' });
+      }
+      
+      // Check if user already exists in database
       const userDoc = await firestore().collection('users').doc(user.uid).get();
       
       if (!userDoc.exists) {

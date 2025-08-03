@@ -5,34 +5,39 @@ interface AuthRequest {
   idToken: string;
 }
 
+// Authentication middleware that can be used by any route
+export const verifyFirebaseToken = async (request: FastifyRequest, _reply: FastifyReply) => {
+  try {
+    const authHeader = request.headers.authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.log('No auth header or invalid format');
+      // Continue without user
+      return;
+    }
+    
+    const idToken = authHeader.split('Bearer ')[1];
+    console.log('Verifying token:', idToken.substring(0, 10) + '...');
+    
+    const decodedToken = await auth().verifyIdToken(idToken);
+    
+    // Add user to request for use in route handlers
+    request.user = decodedToken;
+    console.log('User authenticated:', decodedToken.uid);
+  } catch (error) {
+    console.error('Auth error:', error);
+    // Continue without user
+  }
+};
+
 /**
  * Authentication related routes
  * @param fastify - Fastify instance
  * @param options - Route options
  */
 export const authRoutes = async (fastify: FastifyInstance): Promise<void> => {
-  // Middleware to verify Firebase ID token
-  const verifyToken = async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const authHeader = request.headers.authorization;
-      
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        reply.code(401).send({ error: 'Unauthorized: No token provided' });
-        return;
-      }
-      
-      const idToken = authHeader.split('Bearer ')[1];
-      const decodedToken = await auth().verifyIdToken(idToken);
-      
-      // Add user to request for use in route handlers
-      request.user = decodedToken;
-    } catch (error) {
-      reply.code(401).send({ error: 'Unauthorized: Invalid token' });
-    }
-  };
-
-  // Register the auth middleware
-  fastify.addHook('preHandler', verifyToken);
+  // Register the auth middleware for all auth routes
+  fastify.addHook('preHandler', verifyFirebaseToken);
 
   // Verify token and return user data
   fastify.post<{ Body: AuthRequest }>('/verify', {

@@ -1,25 +1,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { firestore, auth } from '../config/firebase';
+import { firestore } from '../config/firebase';
+import { verifyFirebaseToken } from './auth';
 
-// Middleware to verify Firebase ID token
-const verifyToken = async (request: FastifyRequest, reply: FastifyReply) => {
-  try {
-    const authHeader = request.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      reply.code(401).send({ error: 'Unauthorized: No token provided' });
-      return;
-    }
-    
-    const idToken = authHeader.split('Bearer ')[1];
-    const decodedToken = await auth().verifyIdToken(idToken);
-    
-    // Add user to request for use in route handlers
-    (request as any).user = decodedToken;
-  } catch (error) {
-    reply.code(401).send({ error: 'Unauthorized: Invalid token' });
-  }
-};
+
 
 // Define types for item data
 interface ItemBase {
@@ -68,6 +51,8 @@ interface ClaimItemRequest {
  * @param fastify - Fastify instance
  */
 export const itemRoutes = async (fastify: FastifyInstance): Promise<void> => {
+  // Apply the authentication middleware to all item routes
+  fastify.addHook('preHandler', verifyFirebaseToken);
   // Get all available items
   fastify.get('/', async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
@@ -237,9 +222,7 @@ export const itemRoutes = async (fastify: FastifyInstance): Promise<void> => {
   fastify.post<{
     Params: { id: string };
     Body: { claimedBy?: string };
-  }>('/:id/complete', {
-    preHandler: [verifyToken],
-  }, async (request, reply) => {
+  }>('/:id/complete', async (request, reply) => {
     try {
       const { id } = request.params;
       const { claimedBy } = request.body;
@@ -276,9 +259,7 @@ export const itemRoutes = async (fastify: FastifyInstance): Promise<void> => {
   // Mark an item as given away
   fastify.post<{
     Params: { id: string };
-  }>('/:id/given', {
-    preHandler: [verifyToken],
-  }, async (request, reply) => {
+  }>('/:id/given', async (request, reply) => {
     try {
       const { id } = request.params;
       const userId = request.user.uid;
@@ -308,6 +289,33 @@ export const itemRoutes = async (fastify: FastifyInstance): Promise<void> => {
     } catch (error) {
       request.log.error(error);
       return reply.code(500).send({ error: 'Failed to mark item as given away' });
+    }
+  });
+
+  // Get current authenticated user's items
+  fastify.get('/user', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const user = (request as any).user;
+      
+      if (!user || !user.uid) {
+        return reply.code(401).send({ error: 'Authentication required' });
+      }
+
+      const itemsSnapshot = await firestore()
+        .collection('items')
+        .where('userId', '==', user.uid)
+        .orderBy('createdAt', 'desc')
+        .get();
+
+      const items: Item[] = [];
+      itemsSnapshot.forEach(doc => {
+        items.push({ id: doc.id, ...doc.data() } as Item);
+      });
+
+      return { items };
+    } catch (error) {
+      console.error('Error fetching user items:', error);
+      return reply.code(500).send({ error: 'Failed to fetch user items' });
     }
   });
 

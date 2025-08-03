@@ -106,6 +106,29 @@ const handleGetUserItems = async (user: any): Promise<{ statusCode: number; body
   }
 };
 
+const handleGetItem = async (itemId: string): Promise<{ statusCode: number; body: any }> => {
+  try {
+    const itemDoc = await firestore().collection('items').doc(itemId).get();
+
+    if (!itemDoc.exists) {
+      return {statusCode: 404, body: {error: 'Item not found'}};
+    }
+
+    const itemData = itemDoc.data();
+    const item = {
+      id: itemDoc.id,
+      ...itemData,
+      createdAt: itemData?.createdAt?.toDate?.()?.toISOString() || itemData?.createdAt,
+      updatedAt: itemData?.updatedAt?.toDate?.()?.toISOString() || itemData?.updatedAt,
+    };
+
+    return {statusCode: 200, body: {item}};
+  } catch (error) {
+    console.error('Error fetching item:', error);
+    return {statusCode: 500, body: {error: 'Failed to fetch item'}};
+  }
+};
+
 const handleCreateItem = async (user: any, body: any): Promise<{ statusCode: number; body: any }> => {
   try {
     if (!user || !user.uid) {
@@ -230,6 +253,13 @@ export const api = functions.https.onRequest(async (req, res) => {
       result = await handleGetAllItems();
     } else if (req.method === 'GET' && req.path === '/items/user') {
       result = await handleGetUserItems(user);
+    } else if (req.method === 'GET' && req.path.startsWith('/items/') && req.path !== '/items/user') {
+      const itemId = req.path.split('/').pop();
+      if (itemId) {
+        result = await handleGetItem(itemId);
+      } else {
+        result = {statusCode: 400, body: {error: 'Item ID required'}};
+      }
     } else if (req.method === 'POST' && req.path === '/items') {
       result = await handleCreateItem(user, req.body);
     } else if (req.method === 'DELETE' && req.path.startsWith('/items/')) {

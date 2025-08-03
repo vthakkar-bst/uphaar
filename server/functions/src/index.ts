@@ -1,19 +1,240 @@
-/**
- * Import function triggers from their respective submodules:
- *
- * import {onCall} from "firebase-functions/v2/https";
- * import {onDocumentWritten} from "firebase-functions/v2/firestore";
- *
- * See a full list of supported triggers at https://firebase.google.com/docs/functions
- */
+import * as functions from 'firebase-functions';
+import * as admin from 'firebase-admin';
 
-import {onRequest} from "firebase-functions/v2/https";
-import * as logger from "firebase-functions/logger";
+// Initialize Firebase Admin SDK
+if (admin.apps.length === 0) {
+  admin.initializeApp();
+}
 
-// Start writing functions
-// https://firebase.google.com/docs/functions/typescript
+const firestore = admin.firestore;
+const auth = admin.auth;
 
-// export const helloWorld = onRequest((request, response) => {
-//   logger.info("Hello logs!", {structuredData: true});
-//   response.send("Hello from Firebase!");
-// });
+// Types
+interface UserProfile {
+  uid: string;
+  displayName: string;
+  email: string;
+  photoURL: string;
+  createdAt: any;
+  updatedAt: any;
+}
+
+interface ItemBase {
+  title: string;
+  description: string;
+  category: string;
+  condition: string;
+  imageUrls: string[];
+  location: string;
+  isAvailable: boolean;
+  userId: string;
+  createdAt: any;
+  updatedAt: any;
+}
+
+interface Item extends ItemBase {
+  id: string;
+  claimCount: number;
+}
+
+// Authentication middleware
+const verifyToken = async (req: functions.https.Request): Promise<any> => {
+  try {
+    const authHeader = req.headers.authorization;
+    
+    const authHeaderValue = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+    if (!authHeaderValue || !authHeaderValue.startsWith('Bearer ')) {
+      console.log('No auth header or invalid format');
+      return null;
+    }
+    
+    const token = authHeaderValue.split('Bearer ')[1];
+    console.log('Verifying token:', token.substring(0, 10) + '...');
+    
+    const decodedToken = await auth().verifyIdToken(token);
+    console.log('User authenticated:', decodedToken.uid);
+    
+    return decodedToken;
+  } catch (error) {
+    console.error('Auth error:', error);
+    return null;
+  }
+};
+
+// Route handlers
+const handleGetAllItems = async (): Promise<{ statusCode: number; body: any }> => {
+  try {
+    const itemsSnapshot = await firestore()
+      .collection('items')
+      .where('isAvailable', '==', true)
+      .orderBy('createdAt', 'desc')
+      .get();
+
+    const items: Item[] = [];
+    itemsSnapshot.forEach(doc => {
+      items.push({ id: doc.id, ...doc.data() } as Item);
+    });
+
+    return { statusCode: 200, body: { items } };
+  } catch (error) {
+    console.error('Error fetching items:', error);
+    return { statusCode: 500, body: { error: 'Failed to fetch items' } };
+  }
+};
+
+const handleGetUserItems = async (user: any): Promise<{ statusCode: number; body: any }> => {
+  try {
+    if (!user || !user.uid) {
+      return { statusCode: 401, body: { error: 'Authentication required' } };
+    }
+
+    const itemsSnapshot = await firestore()
+      .collection('items')
+      .where('userId', '==', user.uid)
+      .orderBy('createdAt', 'desc')
+      .get();
+
+    const items: Item[] = [];
+    itemsSnapshot.forEach(doc => {
+      items.push({ id: doc.id, ...doc.data() } as Item);
+    });
+
+    return { statusCode: 200, body: { items } };
+  } catch (error) {
+    console.error('Error fetching user items:', error);
+    return { statusCode: 500, body: { error: 'Failed to fetch user items' } };
+  }
+};
+
+const handleCreateItem = async (user: any, body: any): Promise<{ statusCode: number; body: any }> => {
+  try {
+    if (!user || !user.uid) {
+      return { statusCode: 401, body: { error: 'Authentication required' } };
+    }
+
+    const newItem: ItemBase = {
+      ...body,
+      userId: user.uid,
+      isAvailable: true,
+      createdAt: firestore.Timestamp.now(),
+      updatedAt: firestore.Timestamp.now(),
+      claimCount: 0
+    };
+
+    const docRef = await firestore().collection('items').add(newItem);
+    const createdItem = { id: docRef.id, ...newItem } as Item;
+
+    return { statusCode: 200, body: { item: createdItem } };
+  } catch (error) {
+    console.error('Error creating item:', error);
+    return { statusCode: 500, body: { error: 'Failed to create item' } };
+  }
+};
+
+const handleDeleteItem = async (user: any, itemId: string): Promise<{ statusCode: number; body: any }> => {
+  try {
+    if (!user || !user.uid) {
+      return { statusCode: 401, body: { error: 'Authentication required' } };
+    }
+
+    const itemDoc = await firestore().collection('items').doc(itemId).get();
+    
+    if (!itemDoc.exists) {
+      return { statusCode: 404, body: { error: 'Item not found' } };
+    }
+
+    const itemData = itemDoc.data();
+    if (itemData?.userId !== user.uid) {
+      return { statusCode: 403, body: { error: 'You can only delete your own items' } };
+    }
+
+    await firestore().collection('items').doc(itemId).delete();
+    return { statusCode: 200, body: { success: true } };
+  } catch (error) {
+    console.error('Error deleting item:', error);
+    return { statusCode: 500, body: { error: 'Failed to delete item' } };
+  }
+};
+
+const handleCreateOrUpdateUserProfile = async (user: any): Promise<{ statusCode: number; body: any }> => {
+  try {
+    if (!user || !user.uid) {
+      return { statusCode: 401, body: { error: 'Authentication required' } };
+    }
+    
+    const userDoc = await firestore().collection('users').doc(user.uid).get();
+    
+    if (!userDoc.exists) {
+      const userProfile: UserProfile = {
+        uid: user.uid,
+        displayName: user.name || '',
+        email: user.email || '',
+        photoURL: user.picture || '',
+        createdAt: firestore.Timestamp.now(),
+        updatedAt: firestore.Timestamp.now()
+      };
+      
+      await firestore().collection('users').doc(user.uid).set(userProfile);
+      return { statusCode: 200, body: { profile: userProfile, isNew: true } };
+    } else {
+      const existingProfile = userDoc.data() as UserProfile;
+      return { statusCode: 200, body: { profile: existingProfile, isNew: false } };
+    }
+  } catch (error) {
+    console.error('Error creating/updating user profile:', error);
+    return { statusCode: 500, body: { error: 'Failed to create/update user profile' } };
+  }
+};
+
+// Main Firebase Function
+export const api = functions.https.onRequest(async (req, res) => {
+  // Set CORS headers
+  res.set('Access-Control-Allow-Origin', 'http://localhost:3000');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.set('Access-Control-Allow-Credentials', 'true');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+  
+  try {
+    let user = null;
+    
+    // Verify authentication for protected routes
+    if (req.path !== '/health') {
+      user = await verifyToken(req);
+    }
+    
+    let result: { statusCode: number; body: any };
+    
+    // Route handling
+    if (req.method === 'GET' && req.path === '/health') {
+      result = { statusCode: 200, body: { status: 'ok', timestamp: new Date().toISOString() } };
+    } else if (req.method === 'GET' && req.path === '/api/items') {
+      result = await handleGetAllItems();
+    } else if (req.method === 'GET' && req.path === '/api/items/user') {
+      result = await handleGetUserItems(user);
+    } else if (req.method === 'POST' && req.path === '/api/items') {
+      result = await handleCreateItem(user, req.body);
+    } else if (req.method === 'DELETE' && req.path.startsWith('/api/items/')) {
+      const itemId = req.path.split('/').pop();
+      if (itemId) {
+        result = await handleDeleteItem(user, itemId);
+      } else {
+        result = { statusCode: 400, body: { error: 'Item ID required' } };
+      }
+    } else if (req.method === 'POST' && req.path === '/api/users/profile') {
+      result = await handleCreateOrUpdateUserProfile(user);
+    } else {
+      result = { statusCode: 404, body: { error: 'Route not found' } };
+    }
+    
+    res.status(result.statusCode).json(result.body);
+  } catch (error) {
+    console.error('Firebase Function error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});

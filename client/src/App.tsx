@@ -52,7 +52,7 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <AuthProvider>
-        <Router>
+        <Router basename="/uphaar">
           <Layout>
             <Routes>
               <Route path="/" element={<HomePage />} />

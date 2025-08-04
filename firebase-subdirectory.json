@@ -1,0 +1,27 @@
+{
+  "hosting": {
+    "public": "client/build",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/uphaar/**",
+        "destination": "/uphaar/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "/uphaar/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=3600"
+          }
+        ]
+      }
+    ]
+  }
+}

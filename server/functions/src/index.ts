@@ -414,6 +414,7 @@ export const api = functions.https.onRequest(async (req, res) => {
     'http://localhost:3000',
     'https://uphaar-41dc1.web.app',
     'https://uphaar-41dc1.firebaseapp.com',
+    'https://rwasector19fbd.in',
   ];
   const origin = req.get('origin');
   if (allowedOrigins.includes(origin)) {

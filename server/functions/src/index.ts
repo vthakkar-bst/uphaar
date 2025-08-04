@@ -35,6 +35,10 @@ interface ItemBase {
 interface Item extends ItemBase {
   id: string;
   claimCount: number;
+  isGivenAway: boolean;
+  claimedBy?: string;
+  claimedAt?: any;
+  completedAt?: any;
 }
 
 // Authentication middleware
@@ -219,6 +223,114 @@ const handleDeleteItem = async (user: any, itemId: string): Promise<{ statusCode
   }
 };
 
+const handleClaimItem = async (user: any, itemId: string): Promise<{ statusCode: number; body: any }> => {
+  try {
+    if (!user || !user.uid) {
+      return {statusCode: 401, body: {error: 'Authentication required'}};
+    }
+
+    const itemRef = firestore().collection('items').doc(itemId);
+    const itemDoc = await itemRef.get();
+
+    if (!itemDoc.exists) {
+      return {statusCode: 404, body: {error: 'Item not found'}};
+    }
+
+    const itemData = itemDoc.data();
+
+    // Check if item is available
+    if (!itemData?.isAvailable) {
+      return {statusCode: 400, body: {error: 'Item is no longer available'}};
+    }
+
+    // Check if user is trying to claim their own item
+    if (itemData?.userId === user.uid) {
+      return {statusCode: 400, body: {error: 'You cannot claim your own item'}};
+    }
+
+    // Check if item is already claimed by this user
+    if (itemData?.claimedBy === user.uid) {
+      return {statusCode: 400, body: {error: 'You have already claimed this item'}};
+    }
+
+    // Update item with claim information
+    const updateData = {
+      claimCount: (itemData?.claimCount || 0) + 1,
+      claimedBy: user.uid,
+      claimedAt: firestore.Timestamp.now(),
+      isAvailable: false, // Mark as unavailable once claimed
+      updatedAt: firestore.Timestamp.now(),
+    };
+
+    await itemRef.update(updateData);
+
+    // Get updated item data
+    const updatedDoc = await itemRef.get();
+    const updatedItem = {
+      id: updatedDoc.id,
+      ...updatedDoc.data(),
+    };
+
+    return {statusCode: 200, body: {item: updatedItem, message: 'Item claimed successfully'}};
+  } catch (error) {
+    console.error('Error claiming item:', error);
+    return {statusCode: 500, body: {error: 'Failed to claim item'}};
+  }
+};
+
+const handleCompleteItem = async (user: any, itemId: string, body: any): Promise<{ statusCode: number; body: any }> => {
+  try {
+    if (!user || !user.uid) {
+      return {statusCode: 401, body: {error: 'Authentication required'}};
+    }
+
+    const itemRef = firestore().collection('items').doc(itemId);
+    const itemDoc = await itemRef.get();
+
+    if (!itemDoc.exists) {
+      return {statusCode: 404, body: {error: 'Item not found'}};
+    }
+
+    const itemData = itemDoc.data();
+    // Check if user owns this item
+    if (itemData?.userId !== user.uid) {
+      return {statusCode: 403, body: {error: 'You can only complete your own items'}};
+    }
+
+    // Check if item is already completed
+    if (itemData?.isGivenAway) {
+      return {statusCode: 400, body: {error: 'Item is already marked as completed'}};
+    }
+
+    // Update item as completed
+    const updateData: any = {
+      isGivenAway: true,
+      isAvailable: false,
+      completedAt: firestore.Timestamp.now(),
+      updatedAt: firestore.Timestamp.now(),
+    };
+
+    // If claimedByUserId is provided, use it; otherwise use existing claimedBy
+    if (body.claimedByUserId) {
+      updateData.claimedBy = body.claimedByUserId;
+    }
+
+    await itemRef.update(updateData);
+
+    // Get updated item data
+    const updatedDoc = await itemRef.get();
+    const updatedItem = {
+      id: updatedDoc.id,
+      ...updatedDoc.data(),
+    };
+
+    return {statusCode: 200, body: {item: updatedItem, message: 'Item marked as completed successfully'}};
+  } catch (error) {
+    console.error('Error completing item:', error);
+    return {statusCode: 500, body: {error: 'Failed to complete item'}};
+  }
+};
+
 const handleCreateOrUpdateUserProfile = async (user: any): Promise<{ statusCode: number; body: any }> => {
   try {
     if (!user || !user.uid) {
@@ -359,6 +471,22 @@ export const api = functions.https.onRequest(async (req, res) => {
       const itemId = req.path.split('/').pop();
       if (itemId) {
         result = await handleDeleteItem(user, itemId);
+      } else {
+        result = {statusCode: 400, body: {error: 'Item ID required'}};
+      }
+    } else if (req.method === 'POST' && req.path.match(/^\/items\/[^/]+\/claim$/)) {
+      const pathParts = req.path.split('/');
+      const itemId = pathParts[pathParts.length - 2]; // Get item ID from /items/{id}/claim
+      if (itemId) {
+        result = await handleClaimItem(user, itemId);
+      } else {
+        result = {statusCode: 400, body: {error: 'Item ID required'}};
+      }
+    } else if (req.method === 'POST' && req.path.match(/^\/items\/[^/]+\/complete$/)) {
+      const pathParts = req.path.split('/');
+      const itemId = pathParts[pathParts.length - 2]; // Get item ID from /items/{id}/complete
+      if (itemId) {
+        result = await handleCompleteItem(user, itemId, req.body);
       } else {
         result = {statusCode: 400, body: {error: 'Item ID required'}};
       }

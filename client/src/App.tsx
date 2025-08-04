@@ -14,6 +14,8 @@ import ItemDetailPage from './pages/ItemDetailPage';
 import NewItemPage from './pages/NewItemPage';
 import MyItemsPage from './pages/MyItemsPage';
 import ProfilePage from './pages/ProfilePage';
+import ManageClaimsPage from './pages/ManageClaimsPage';
+import EditItemPage from './pages/EditItemPage';
 
 // Create a theme
 const theme = createTheme({
@@ -80,6 +82,22 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <ProfilePage />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route 
+                path="/items/manage/:id" 
+                element={
+                  <ProtectedRoute>
+                    <ManageClaimsPage />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route 
+                path="/items/edit/:id" 
+                element={
+                  <ProtectedRoute>
+                    <EditItemPage />
                   </ProtectedRoute>
                 } 
               />
